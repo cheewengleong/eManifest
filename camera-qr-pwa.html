@@ -1,0 +1,1670 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>eManifest CamQR — Camera Capture &amp; QR Scanner Demo</title>
+<meta name="description" content="Self-contained browser demo: take a picture with getUserMedia and scan QR codes with BarcodeDetector or jsQR. Installable as a PWA." />
+<meta name="theme-color" content="#0b1020" />
+<meta name="color-scheme" content="dark light" />
+
+<!-- iOS / legacy PWA hints (the runtime manifest is injected by JS below) -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="eManifest CamQR" />
+
+<!-- Optional QR fallback decoder. Loaded lazily by JS only when BarcodeDetector is missing. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+
+<style>
+  :root {
+    --bg: #0b1020;
+    --surface: #141a2e;
+    --surface-2: #1c2440;
+    --border: #2a3352;
+    --text: #eef1fb;
+    --muted: #9aa6c8;
+    --accent: #4f8cff;
+    --accent-strong: #2f6ae0;
+    --ok: #2ecc8f;
+    --warn: #f0b429;
+    --err: #ff6b6b;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+    --tap: 44px;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6fb;
+      --surface: #ffffff;
+      --surface-2: #eef1f8;
+      --border: #d7deee;
+      --text: #131a2b;
+      --muted: #5b6885;
+      --shadow: 0 8px 24px rgba(20, 30, 60, .10);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { margin: 0; padding: 0; }
+
+  body {
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 16px calc(24px + var(--safe-bottom));
+    flex: 1 1 auto;
+  }
+
+  /* ---------- Header ---------- */
+  header.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: calc(12px + var(--safe-top)) 0 10px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .header-row {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: linear-gradient(140deg, var(--accent), #7b5cff);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-size: 18px;
+    flex: 0 0 auto;
+    box-shadow: var(--shadow);
+  }
+
+  .brand h1 {
+    font-size: 17px;
+    line-height: 1.2;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .brand p { margin: 0; font-size: 12px; color: var(--muted); }
+
+  .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  /* ---------- Tabs ---------- */
+  nav.tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 6px;
+    margin: 14px 0 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+
+  nav.tabs button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    min-height: var(--tap);
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background .18s ease, color .18s ease;
+  }
+
+  nav.tabs button[aria-selected="true"] {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: var(--shadow);
+  }
+
+  /* ---------- Cards / sections ---------- */
+  section.panel { display: none; }
+  section.panel.is-active { display: block; animation: fade .22s ease; }
+
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .card + .card { margin-top: 14px; }
+
+  .card h2 { font-size: 16px; margin: 0 0 4px; }
+  .card .hint { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+
+  /* ---------- Video / stage ---------- */
+  .stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #05070f;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .stage video, .stage canvas.overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .stage[data-facing="user"] video { transform: scaleX(-1); }
+
+  .stage-placeholder {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: 6px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 16px;
+  }
+
+  .stage-placeholder .glyph { font-size: 30px; opacity: .8; }
+  .stage.is-live .stage-placeholder { display: none; }
+
+  .scan-frame {
+    position: absolute;
+    inset: 18% 14%;
+    border-radius: 16px;
+    border: 2px solid rgba(255, 255, 255, .55);
+    box-shadow: 0 0 0 2000px rgba(3, 6, 15, .35);
+    pointer-events: none;
+    display: none;
+  }
+
+  .stage.is-live .scan-frame { display: none; }
+  .stage.is-live.is-scanning .scan-frame { display: block; }
+
+  .scan-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+    animation: sweep 2.2s ease-in-out infinite;
+  }
+
+  @keyframes sweep { 0%, 100% { top: 4%; } 50% { top: 96%; } }
+
+  .stage-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 3;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(5, 8, 18, .72);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, .18);
+    display: none;
+  }
+
+  .stage.is-live .stage-badge { display: inline-block; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    appearance: none;
+    font: inherit;
+    font-weight: 600;
+    font-size: 15px;
+    min-height: var(--tap);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-decoration: none;
+    transition: transform .12s ease, filter .18s ease, opacity .18s ease;
+  }
+
+  .btn:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn:active:not(:disabled) { transform: scale(.98); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-danger { background: transparent; border-color: color-mix(in srgb, var(--err) 55%, var(--border)); color: var(--err); }
+  .btn-ghost { background: transparent; }
+  .btn-sm { min-height: 38px; font-size: 13px; padding: 7px 11px; }
+  .btn-block { width: 100%; }
+
+  :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 2px; }
+
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .actions .span-2 { grid-column: 1 / -1; }
+
+  @media (max-width: 380px) {
+    .actions { grid-template-columns: 1fr; }
+    .actions .span-2 { grid-column: auto; }
+  }
+
+  /* ---------- Status / notices ---------- */
+  .status {
+    margin-top: 12px;
+    font-size: 13.5px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .status[data-level="ok"] { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); color: var(--ok); }
+  .status[data-level="warn"] { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); color: var(--warn); }
+  .status[data-level="err"] { border-color: color-mix(in srgb, var(--err) 55%, var(--border)); color: var(--err); }
+  .status[hidden] { display: none; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .pill[data-tone="ok"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+  .pill[data-tone="warn"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+  .pill[data-tone="err"] { color: var(--err); border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
+
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+
+  /* ---------- Captured photo ---------- */
+  .photo-wrap { margin-top: 14px; }
+  .photo-wrap[hidden] { display: none; }
+
+  .photo-wrap img {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    display: block;
+    background: #05070f;
+  }
+
+  .meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+
+  /* ---------- QR result ---------- */
+  .qr-result {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+  }
+
+  .qr-result .label {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .qr-result .value {
+    font-size: 17px;
+    font-weight: 650;
+    word-break: break-word;
+    white-space: pre-wrap;
+    line-height: 1.45;
+  }
+
+  .qr-result.empty .value { color: var(--muted); font-weight: 500; font-size: 15px; }
+  .qr-result .result-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .qr-result.empty .result-actions { display: none; }
+
+  .log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+
+  .log li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    font-size: 14px;
+    word-break: break-word;
+  }
+
+  .log .idx {
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 7px;
+    flex: 0 0 auto;
+    margin-top: 1px;
+  }
+
+  .log .body { min-width: 0; flex: 1 1 auto; }
+  .log time { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .log .empty-note { border: 0; background: transparent; padding: 0; color: var(--muted); font-size: 13.5px; }
+
+  /* ---------- Footer notes ---------- */
+  footer.notes {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 18px 16px calc(18px + var(--safe-bottom));
+    font-size: 12.5px;
+    color: var(--muted);
+    display: grid;
+    gap: 10px;
+  }
+
+  .note {
+    border-left: 3px solid var(--accent);
+    padding: 8px 12px;
+    background: var(--surface);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .note strong { color: var(--text); }
+  .note.privacy { border-left-color: var(--ok); }
+  .note.pwa { border-left-color: var(--warn); }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-word; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-row">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">◉</div>
+      <div>
+        <h1>eManifest CamQR</h1>
+        <p>Camera capture &amp; QR scanning — 100% in-browser</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="pwa-pill" class="pill" data-tone="warn" title="Progressive Web App status">
+        <span class="dot" aria-hidden="true"></span><span id="pwa-pill-text">PWA: checking…</span>
+      </span>
+      <button id="install-btn" class="btn btn-sm btn-primary" type="button" hidden>Install</button>
+    </div>
+  </div>
+</header>
+
+<div class="app">
+  <nav class="tabs" role="tablist" aria-label="Demo modes">
+    <button id="tab-btn-camera" role="tab" aria-selected="true" aria-controls="panel-camera" type="button">
+      <span aria-hidden="true">📷</span> Take Picture
+    </button>
+    <button id="tab-btn-qr" role="tab" aria-selected="false" aria-controls="panel-qr" tabindex="-1" type="button">
+      <span aria-hidden="true">🔳</span> Scan QR Code
+    </button>
+  </nav>
+
+  <!-- ============ TAKE PICTURE ============ -->
+  <section id="panel-camera" class="panel is-active" role="tabpanel" aria-labelledby="tab-btn-camera" tabindex="0">
+    <div class="card">
+      <h2>Take a picture</h2>
+      <p class="hint">Live preview via <code>getUserMedia</code>. The captured frame is drawn to a canvas locally — it never leaves this device.</p>
+
+      <div class="stage" id="stage-camera" data-facing="environment">
+        <span class="stage-badge" id="cam-badge">● Live</span>
+        <video id="cam-video" playsinline muted autoplay></video>
+        <div class="stage-placeholder" id="cam-placeholder">
+          <span class="glyph" aria-hidden="true">📷</span>
+          <span>Camera is off.<br />Tap <strong>Start camera</strong> to begin.</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="cam-start" class="btn btn-primary" type="button">Start camera</button>
+        <button id="cam-flip" class="btn" type="button" disabled>
+          <span aria-hidden="true">🔄</span> <span id="cam-flip-label">Front camera</span>
+        </button>
+        <button id="cam-capture" class="btn" type="button" disabled>
+          <span aria-hidden="true">⦿</span> Capture
+        </button>
+        <button id="cam-stop" class="btn btn-danger" type="button" disabled>Stop camera</button>
+      </div>
+
+      <div id="cam-status" class="status" role="status" aria-live="polite" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Captured photo</h2>
+      <p class="hint">Still frame grabbed from the video stream.</p>
+
+      <div class="photo-wrap" id="photo-wrap" hidden>
+        <img id="photo-img" alt="Captured still image from the device camera" />
+        <div class="meta" id="photo-meta"></div>
+        <div class="actions">
+          <a id="photo-download" class="btn btn-primary" download>
+            <span aria-hidden="true">⬇️</span> Download
+          </a>
+          <button id="photo-reset" class="btn" type="button">Reset / clear</button>
+        </div>
+      </div>
+
+      <p id="photo-empty" class="hint" style="margin:0">No photo captured yet.</p>
+    </div>
+  </section>
+
+  <!-- ============ SCAN QR ============ -->
+  <section id="panel-qr" class="panel" role="tabpanel" aria-labelledby="tab-btn-qr" tabindex="0" hidden>
+    <div class="card">
+      <h2>Scan a QR code</h2>
+      <p class="hint">
+        Decoder engine: <strong id="qr-engine-name">detecting…</strong>
+        <span id="qr-engine-pill" class="pill" data-tone="warn" style="margin-left:6px"><span class="dot" aria-hidden="true"></span><span id="qr-engine-text">checking</span></span>
+      </p>
+
+      <div class="stage" id="stage-qr" data-facing="environment">
+        <span class="stage-badge" id="qr-badge">● Scanning</span>
+        <video id="qr-video" playsinline muted autoplay></video>
+        <div class="scan-frame" aria-hidden="true"><div class="scan-line"></div></div>
+        <div class="stage-placeholder" id="qr-placeholder">
+          <span class="glyph" aria-hidden="true">🔳</span>
+          <span>Scanner is off.<br />Tap <strong>Start scanning</strong> and point at a QR code.</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="qr-start" class="btn btn-primary" type="button">Start scanning</button>
+        <button id="qr-stop" class="btn" type="button" disabled>Stop scanning</button>
+        <button id="qr-flip" class="btn" type="button" disabled>
+          <span aria-hidden="true">🔄</span> <span id="qr-flip-label">Front camera</span>
+        </button>
+        <button id="qr-release" class="btn btn-danger" type="button" disabled>Release camera</button>
+      </div>
+
+      <div id="qr-status" class="status" role="status" aria-live="polite" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Result</h2>
+      <div class="qr-result empty" id="qr-result">
+        <div class="label" id="qr-result-label">Latest scan</div>
+        <div class="value" id="qr-result-value">No QR code found yet.</div>
+        <div class="result-actions">
+          <button id="qr-copy" class="btn btn-sm" type="button">Copy</button>
+          <a id="qr-open" class="btn btn-sm" target="_blank" rel="noopener noreferrer" hidden>Open link</a>
+        </div>
+      </div>
+
+      <h2 style="margin-top:18px">Scan history</h2>
+      <p class="hint">Kept in memory only (last 20). Cleared on reload.</p>
+      <ul class="log" id="qr-log" aria-live="polite">
+        <li class="empty-note">Nothing scanned yet.</li>
+      </ul>
+      <div class="actions">
+        <button id="qr-clear-log" class="btn btn-ghost btn-block" type="button">Clear history</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<footer class="notes">
+  <div class="note privacy">
+    <strong>Private by design.</strong> Images and decoded QR text are processed entirely in this browser tab.
+    Nothing is uploaded, no analytics, no network calls — except the optional <code>jsQR</code> decoder from a CDN
+    if your browser lacks the native <code>BarcodeDetector</code> API.
+  </div>
+  <div class="note">
+    <strong>Requires a secure context.</strong> Camera access only works over <code>https://</code> or
+    <code>http://localhost</code> (a plain <code>http://</code> LAN address is blocked). Opening this file straight
+    from disk (<code>file://</code>) keeps the UI working and the camera usually still runs in Chrome, but PWA
+    install and service workers need an <code>https://</code> or <code>localhost</code> origin.
+  </div>
+  <div class="note pwa" id="pwa-note">
+    <strong>Install as an app:</strong> <span id="pwa-note-text">checking install support…</span>
+  </div>
+  <div class="note">
+    <dl class="kv">
+      <dt>Secure context</dt><dd id="info-secure">—</dd>
+      <dt>mediaDevices</dt><dd id="info-media">—</dd>
+      <dt>BarcodeDetector</dt><dd id="info-bd">—</dd>
+      <dt>Service worker</dt><dd id="info-sw">—</dd>
+      <dt>Standalone</dt><dd id="info-standalone">—</dd>
+    </dl>
+  </div>
+</footer>
+
+<canvas id="work-canvas" class="sr-only" aria-hidden="true"></canvas>
+<canvas id="capture-canvas" class="sr-only" aria-hidden="true"></canvas>
+
+<script>
+/*
+ * eManifest CamQR demo — camera capture + QR scanning.
+ * Everything runs locally in this tab. No data is transmitted (except the
+ * optional jsQR decoder script, loaded only when BarcodeDetector is absent).
+ */
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var els = {
+    stageCamera: $('stage-camera'), camVideo: $('cam-video'), camBadge: $('cam-badge'),
+    camStart: $('cam-start'), camStop: $('cam-stop'), camCapture: $('cam-capture'),
+    camFlip: $('cam-flip'), camFlipLabel: $('cam-flip-label'), camStatus: $('cam-status'),
+    photoWrap: $('photo-wrap'), photoImg: $('photo-img'), photoMeta: $('photo-meta'),
+    photoDownload: $('photo-download'), photoReset: $('photo-reset'), photoEmpty: $('photo-empty'),
+    stageQr: $('stage-qr'), qrVideo: $('qr-video'), qrBadge: $('qr-badge'),
+    qrStart: $('qr-start'), qrStop: $('qr-stop'), qrFlip: $('qr-flip'),
+    qrFlipLabel: $('qr-flip-label'), qrRelease: $('qr-release'), qrStatus: $('qr-status'),
+    engineName: $('qr-engine-name'), enginePill: $('qr-engine-pill'), engineText: $('qr-engine-text'),
+    qrResult: $('qr-result'), qrResultLabel: $('qr-result-label'), qrResultValue: $('qr-result-value'),
+    qrCopy: $('qr-copy'), qrOpen: $('qr-open'), qrLog: $('qr-log'), qrClearLog: $('qr-clear-log'),
+    workCanvas: $('work-canvas'), captureCanvas: $('capture-canvas'),
+    tabBtnCamera: $('tab-btn-camera'), tabBtnQr: $('tab-btn-qr'),
+    panelCamera: $('panel-camera'), panelQr: $('panel-qr')
+  };
+
+  /* ------------------------------------------------------------------ *
+   * Small helpers
+   * ------------------------------------------------------------------ */
+
+  function setStatus(node, level, message) {
+    if (!message) { node.hidden = true; node.textContent = ''; return; }
+    node.hidden = false;
+    node.dataset.level = level || 'info';
+    node.textContent = message;
+  }
+
+  function setPill(node, textNode, tone, text) {
+    node.dataset.tone = tone || 'warn';
+    textNode.textContent = text;
+  }
+
+  function fmtBytes(n) {
+    if (!n && n !== 0) return '—';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    return (n / 1048576).toFixed(2) + ' MB';
+  }
+
+  function stamp(d) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function isUrl(text) {
+    try { var u = new URL(text); return u.protocol === 'http:' || u.protocol === 'https:'; }
+    catch (e) { return false; }
+  }
+
+  function buzz(ms) {
+    if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* ignore */ } }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Single shared camera controller.
+   * Only ONE MediaStream may exist at a time; every code path that stops
+   * or switches goes through stopCamera(), which stops all tracks.
+   * ------------------------------------------------------------------ */
+
+  var PENDING_TIMEOUT_MS = 25000;
+
+  var Cam = {
+    stream: null,        // the one and only MediaStream
+    owner: null,         // 'camera' | 'qr' — which panel currently holds it
+    facing: 'environment',
+    pending: null,       // in-flight start promise (prevents double-open)
+    pendingTimer: 0,     // watchdog for a permission prompt that never settles
+    gen: 0               // request generation: stale results are discarded
+  };
+
+  function releaseStream(stream) {
+    if (!stream) return;
+    var tracks = stream.getTracks();
+    for (var i = 0; i < tracks.length; i++) {
+      try { tracks[i].stop(); } catch (e) { /* already stopped */ }
+    }
+  }
+
+  function hasMediaSupport() {
+    return !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+  }
+
+  function preflight() {
+    if (!window.isSecureContext) {
+      return 'This page is not a secure context. Camera access requires https:// or http://localhost. ' +
+             'Serve the file over HTTPS (or open it from localhost) and reload.';
+    }
+    if (!hasMediaSupport()) {
+      return 'getUserMedia is not available in this browser. Try a recent Chrome, Edge, Firefox or Safari.';
+    }
+    return null;
+  }
+
+  function constraintSets(facing) {
+    // Try a strict facingMode first (real front/back switch on phones), then
+    // progressively relax so desktop webcams still work.
+    return [
+      { audio: false, video: { facingMode: { exact: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+      { audio: false, video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } } },
+      { audio: false, video: { facingMode: facing } },
+      { audio: false, video: true }
+    ];
+  }
+
+  function describeCameraError(err) {
+    var name = err && err.name ? err.name : 'UnknownError';
+    switch (name) {
+      case 'NotAllowedError':
+      case 'PermissionDeniedError':
+        return 'Camera permission was denied. Allow camera access for this site in the browser ' +
+               'address-bar settings, then tap Start again.';
+      case 'NotFoundError':
+      case 'DevicesNotFoundError':
+        return 'No camera device was found on this device.';
+      case 'OverconstrainedError':
+      case 'ConstraintNotSatisfiedError':
+        return 'The requested camera constraint is not satisfiable (' +
+               ((err && err.constraint) || 'unknown constraint') + ').';
+      case 'NotReadableError':
+      case 'TrackStartError':
+        return 'The camera is already in use by another application (or another tab). Close it and retry.';
+      case 'SecurityError':
+        return 'Blocked by the browser for security reasons. Camera needs a secure context (https:// or localhost).';
+      case 'AbortError':
+        return 'Camera start was aborted. Please try again.';
+      default:
+        return 'Could not start the camera: ' + name + (err && err.message ? ' — ' + err.message : '');
+    }
+  }
+
+  function paintStage() {
+    var camLive = Cam.stream && Cam.owner === 'camera';
+    var qrLive = Cam.stream && Cam.owner === 'qr';
+    els.stageCamera.classList.toggle('is-live', !!camLive);
+    els.stageQr.classList.toggle('is-live', !!qrLive);
+    els.stageQr.classList.toggle('is-scanning', !!qrLive && QR.scanning);
+    els.stageCamera.dataset.facing = Cam.facing;
+    els.stageQr.dataset.facing = Cam.facing;
+    var side = Cam.facing === 'user' ? ' · front' : ' · back';
+    els.camBadge.textContent = '● Live' + side;
+    els.qrBadge.textContent = (qrLive && QR.scanning ? '● Scanning' : '❚❚ Paused') + side;
+  }
+
+  function syncButtons() {
+    var camOn = !!Cam.stream && Cam.owner === 'camera';
+    var qrOn = !!Cam.stream && Cam.owner === 'qr';
+    var pending = !!Cam.pending;
+    var flipLabel = Cam.facing === 'user' ? 'Back camera' : 'Front camera';
+
+    els.camStart.disabled = camOn || pending || !hasMediaSupport();
+    els.camStart.textContent = camOn ? 'Camera is on' : (pending ? 'Requesting…' : 'Start camera');
+    els.camStop.disabled = !camOn && !pending;
+    els.camCapture.disabled = !camOn;
+    els.camFlip.disabled = !camOn || pending;
+    els.camFlipLabel.textContent = flipLabel;
+
+    els.qrStart.disabled = qrOn || pending || !hasMediaSupport() || QR.engine === 'none' || !!QR.engineBusy;
+    els.qrStart.textContent = qrOn ? (QR.scanning ? 'Scanning…' : 'Resume scanning') : (pending ? 'Requesting…' : 'Start scanning');
+    els.qrStop.disabled = !qrOn || !QR.scanning;
+    els.qrFlip.disabled = !qrOn || pending;
+    els.qrFlipLabel.textContent = flipLabel;
+    els.qrRelease.disabled = !qrOn && !pending;
+
+    paintStage();
+  }
+
+  function stopCamera(reason) {
+    if (QR.scanning) stopScanLoop();
+    Cam.gen++;                        // invalidate any in-flight getUserMedia result
+    if (Cam.pendingTimer) { clearTimeout(Cam.pendingTimer); Cam.pendingTimer = 0; }
+    releaseStream(Cam.stream);
+    Cam.stream = null;
+    Cam.owner = null;
+    Cam.pending = null;
+    try { els.camVideo.srcObject = null; } catch (e) { /* ignore */ }
+    try { els.qrVideo.srcObject = null; } catch (e) { /* ignore */ }
+    syncButtons();
+    if (reason) {
+      setStatus(els.camStatus, 'warn', reason);
+      setStatus(els.qrStatus, 'warn', reason);
+    }
+  }
+
+  function startCamera(owner) {
+    var statusEl = owner === 'qr' ? els.qrStatus : els.camStatus;
+    var blocked = preflight();
+    if (blocked) {
+      setStatus(statusEl, 'err', blocked);
+      syncButtons();
+      return Promise.resolve(null);
+    }
+    if (Cam.pending) {
+      // Guard: never open a second stream. Tell the user what we are waiting for.
+      setStatus(statusEl, 'info',
+        'Still waiting for the browser to answer the camera permission prompt — check the camera icon in the address bar.');
+      syncButtons();
+      return Cam.pending;
+    }
+    if (Cam.stream && Cam.owner === owner) return Promise.resolve(Cam.stream);
+
+    stopCamera();                                   // release anything held by the other mode
+    var gen = ++Cam.gen;
+
+    var sets = constraintSets(Cam.facing);
+    var attempt = function (idx) {
+      return navigator.mediaDevices.getUserMedia(sets[idx]).catch(function (err) {
+        // A strict facingMode that no device satisfies is not fatal: relax and retry.
+        if ((err && err.name === 'OverconstrainedError') && idx < sets.length - 1) return attempt(idx + 1);
+        throw err;
+      });
+    };
+
+    var request = attempt(0).then(function (stream) {
+      if (gen !== Cam.gen) { releaseStream(stream); return null; }   // stale/superseded request
+      if (Cam.pendingTimer) { clearTimeout(Cam.pendingTimer); Cam.pendingTimer = 0; }
+      Cam.pending = null;
+      Cam.stream = stream;
+      Cam.owner = owner;
+
+      var video = owner === 'qr' ? els.qrVideo : els.camVideo;
+      video.srcObject = stream;
+      var playing = video.play();
+      if (playing && typeof playing.catch === 'function') playing.catch(function () { /* autoplay policy */ });
+
+      var track = stream.getVideoTracks()[0];
+      var settings = (track && track.getSettings) ? (track.getSettings() || {}) : {};
+      if (settings.facingMode) Cam.facing = settings.facingMode;
+
+      stream.getVideoTracks().forEach(function (t) {
+        t.addEventListener('ended', function () { stopCamera('The camera was turned off by the system.'); });
+      });
+
+      syncButtons();
+      var rawLabel = track && track.label ? track.label : 'camera';
+      var label = rawLabel.length > 34 ? rawLabel.slice(0, 33) + '…' : rawLabel;
+      var msg = 'Camera ready (' + (Cam.facing === 'user' ? 'front' : 'back') + ' · ' + label + ').';
+      setStatus(statusEl, 'ok', msg);
+      return stream;
+    }).catch(function (err) {
+      if (Cam.pendingTimer) { clearTimeout(Cam.pendingTimer); Cam.pendingTimer = 0; }
+      if (gen !== Cam.gen) return null;               // superseded: stopCamera() already reported
+      Cam.pending = null;
+      Cam.stream = null;
+      Cam.owner = null;
+      syncButtons();
+      setStatus(statusEl, 'err', describeCameraError(err));
+      return null;
+    });
+
+    // Assign before any handler can run (microtask), so the UI shows the pending state.
+    Cam.pending = request;
+    // Some browsers leave the permission prompt pending indefinitely (headless,
+    // kiosk mode, or a dismissed native dialog). Recover so the UI is never stuck.
+    Cam.pendingTimer = setTimeout(function () {
+      Cam.pendingTimer = 0;
+      if (!Cam.pending || gen !== Cam.gen) return;
+      Cam.pending = null;
+      Cam.gen++;
+      syncButtons();
+      setStatus(statusEl, 'warn',
+        'The camera request did not resolve within ' + Math.round(PENDING_TIMEOUT_MS / 1000) + 's. The permission prompt may ' +
+        'still be waiting or may have been blocked — check the camera icon in the address bar, then tap Start again.');
+    }, PENDING_TIMEOUT_MS);
+    syncButtons();
+
+    return request;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Tabs — switching modes always releases the camera
+   * ------------------------------------------------------------------ */
+
+  var activeTab = 'camera';
+
+  function selectTab(next, focus) {
+    if (next === activeTab) return;
+    activeTab = next;
+    var isCam = next === 'camera';
+
+    els.tabBtnCamera.setAttribute('aria-selected', String(isCam));
+    els.tabBtnQr.setAttribute('aria-selected', String(!isCam));
+    els.tabBtnCamera.tabIndex = isCam ? 0 : -1;
+    els.tabBtnQr.tabIndex = isCam ? -1 : 0;
+
+    els.panelCamera.classList.toggle('is-active', isCam);
+    els.panelQr.classList.toggle('is-active', !isCam);
+    els.panelCamera.hidden = !isCam;
+    els.panelQr.hidden = isCam;
+
+    stopCamera();  // one camera, one owner
+    setStatus(els.camStatus, 'info', '');
+    setStatus(els.qrStatus, 'info', '');
+
+    if (focus) (isCam ? els.tabBtnCamera : els.tabBtnQr).focus();
+  }
+
+  els.tabBtnCamera.addEventListener('click', function () { selectTab('camera'); });
+  els.tabBtnQr.addEventListener('click', function () { selectTab('qr'); });
+
+  [els.tabBtnCamera, els.tabBtnQr].forEach(function (btn) {
+    btn.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft' || ev.key === 'Home' || ev.key === 'End') {
+        ev.preventDefault();
+        selectTab(activeTab === 'camera' ? 'qr' : 'camera', true);
+      }
+    });
+  });
+
+  /* ------------------------------------------------------------------ *
+   * Take picture
+   * ------------------------------------------------------------------ */
+
+  var photoUrl = null;
+
+  function clearPhoto() {
+    if (photoUrl) { URL.revokeObjectURL(photoUrl); photoUrl = null; }
+    els.photoImg.removeAttribute('src');
+    els.photoDownload.removeAttribute('href');
+    els.photoMeta.textContent = '';
+    els.photoWrap.hidden = true;
+    els.photoEmpty.hidden = false;
+  }
+
+  function capturePhoto() {
+    var v = els.camVideo;
+    if (!Cam.stream || Cam.owner !== 'camera') {
+      setStatus(els.camStatus, 'err', 'Start the camera before capturing a photo.');
+      return;
+    }
+    if (v.readyState < 2 || !v.videoWidth || !v.videoHeight) {
+      setStatus(els.camStatus, 'warn', 'The video stream is not ready yet — wait a moment and capture again.');
+      return;
+    }
+
+    var w = v.videoWidth, h = v.videoHeight;
+    var canvas = els.captureCanvas;
+    canvas.width = w;
+    canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) { setStatus(els.camStatus, 'err', 'Canvas 2D context unavailable in this browser.'); return; }
+
+    // Mirror front-camera stills so they match the on-screen preview.
+    ctx.save();
+    if (Cam.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(v, 0, 0, w, h);
+    ctx.restore();
+
+    var toBlob = canvas.toBlob;
+    if (typeof toBlob !== 'function') {
+      setStatus(els.camStatus, 'err', 'canvas.toBlob is not supported in this browser.');
+      return;
+    }
+    canvas.toBlob(function (blob) {
+      if (!blob) {
+        setStatus(els.camStatus, 'err', 'Could not encode the captured frame as an image.');
+        return;
+      }
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
+      photoUrl = URL.createObjectURL(blob);
+
+      var when = new Date();
+      els.photoImg.src = photoUrl;
+      els.photoDownload.href = photoUrl;
+      els.photoDownload.download = 'emanifest-camqr-' + when.toISOString().replace(/[:.]/g, '-') + '.jpg';
+      els.photoMeta.innerHTML = '';
+      var bits = [
+        ['Captured', stamp(when)],
+        ['Resolution', w + ' × ' + h + ' px'],
+        ['Size', fmtBytes(blob.size)],
+        ['Camera', Cam.facing === 'user' ? 'front' : 'back'],
+        ['Format', blob.type || 'image/jpeg']
+      ];
+      bits.forEach(function (pair) {
+        var span = document.createElement('span');
+        span.textContent = pair[0] + ': ' + pair[1];
+        els.photoMeta.appendChild(span);
+      });
+      els.photoWrap.hidden = false;
+      els.photoEmpty.hidden = true;
+      setStatus(els.camStatus, 'ok', 'Photo captured — ' + w + '×' + h + ', ' + fmtBytes(blob.size) + '. Stored in this tab only.');
+      buzz(25);
+    }, 'image/jpeg', 0.92);
+  }
+
+  els.camStart.addEventListener('click', function () {
+    setStatus(els.camStatus, 'info', 'Requesting camera access…');
+    startCamera('camera');
+  });
+  els.camStop.addEventListener('click', function () { stopCamera(); setStatus(els.camStatus, 'info', 'Camera stopped and all tracks released.'); });
+  els.camCapture.addEventListener('click', capturePhoto);
+  els.photoReset.addEventListener('click', function () { clearPhoto(); setStatus(els.camStatus, 'info', 'Captured photo cleared from memory.'); });
+
+  els.camFlip.addEventListener('click', function () {
+    Cam.facing = Cam.facing === 'user' ? 'environment' : 'user';
+    stopCamera();   // must fully release the track before re-negotiating facingMode
+    setStatus(els.camStatus, 'info', 'Switching to the ' + (Cam.facing === 'user' ? 'front' : 'back') + ' camera…');
+    startCamera('camera');
+  });
+
+  /* ------------------------------------------------------------------ *
+   * QR scanning
+   * ------------------------------------------------------------------ */
+
+  var QR = {
+    engine: 'checking',     // 'checking' | 'native' | 'jsqr' | 'none'
+    engineBusy: false,
+    ready: null,            // promise resolved once the decoder engine is known
+    detector: null,
+    scanning: false,
+    rafId: 0,
+    nextTick: 0,
+    busyFrame: false,
+    cooldownUntil: 0,
+    lastValue: null,
+    history: [],
+    jsqrPromise: null
+  };
+
+  var JSQR_SOURCES = [
+    'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+    'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'
+  ];
+
+  function loadScript(src, timeoutMs) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      var timer = setTimeout(function () { cleanup(); reject(new Error('timeout')); }, timeoutMs || 10000);
+      function cleanup() { clearTimeout(timer); s.onload = null; s.onerror = null; }
+      s.src = src;
+      s.async = true;
+      s.crossOrigin = 'anonymous';
+      s.onload = function () { cleanup(); resolve(src); };
+      s.onerror = function () { cleanup(); s.remove(); reject(new Error('load-failed')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function loadJsQR() {
+    if (QR.jsqrPromise) return QR.jsqrPromise;
+    QR.jsqrPromise = (function trySource(i) {
+      if (i >= JSQR_SOURCES.length) return Promise.reject(new Error('All CDN sources failed'));
+      return loadScript(JSQR_SOURCES[i], 10000).then(function () {
+        if (typeof window.jsQR !== 'function') throw new Error('jsQR not defined after load');
+        return window.jsQR;
+      }).catch(function () { return trySource(i + 1); });
+    })(0);
+    return QR.jsqrPromise;
+  }
+
+  function renderEngine() {
+    var tone = QR.engine === 'none' ? 'err' : (QR.engine === 'checking' ? 'warn' : 'ok');
+    var label = {
+      checking: 'checking…',
+      native: 'BarcodeDetector (native)',
+      jsqr: 'jsQR (CDN fallback)',
+      none: 'no decoder available'
+    }[QR.engine] || QR.engine;
+    els.engineName.textContent = label;
+    setPill(els.enginePill, els.engineText, tone, QR.engine === 'native' ? 'native API' :
+      QR.engine === 'jsqr' ? 'fallback loaded' :
+      QR.engine === 'none' ? 'unavailable' : 'detecting');
+    syncButtons();
+  }
+
+  function initEngine() {
+    renderEngine();
+    var p;
+    if ('BarcodeDetector' in window) {
+      p = Promise.resolve()
+        .then(function () { return window.BarcodeDetector.getSupportedFormats ? window.BarcodeDetector.getSupportedFormats() : ['qr_code']; })
+        .then(function (formats) {
+          if (Array.prototype.indexOf.call(formats, 'qr_code') === -1) throw new Error('qr_code unsupported');
+          QR.detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+          QR.engine = 'native';
+        })
+        .catch(function () { return loadJsQR().then(function () { QR.engine = 'jsqr'; }); });
+    } else {
+      p = loadJsQR().then(function () { QR.engine = 'jsqr'; });
+    }
+    return p.catch(function () { QR.engine = 'none'; QR.detector = null; })
+             .then(function () {
+        renderEngine();
+        if (QR.engine === 'none') {
+          setStatus(els.qrStatus, 'err',
+            'No QR decoder available: this browser has no native BarcodeDetector and the jsQR CDN script could not be ' +
+            'loaded (offline or blocked). Camera preview still works.');
+        }
+      });
+  }
+
+  function stopScanLoop() {
+    QR.scanning = false;
+    if (QR.rafId) { cancelAnimationFrame(QR.rafId); QR.rafId = 0; }
+    QR.busyFrame = false;
+  }
+
+  function pushHistory(entry) {
+    QR.history.unshift(entry);
+    if (QR.history.length > 20) QR.history.length = 20;
+    renderHistory();
+  }
+
+  function renderHistory() {
+    els.qrLog.innerHTML = '';
+    if (!QR.history.length) {
+      var li = document.createElement('li');
+      li.className = 'empty-note';
+      li.textContent = 'Nothing scanned yet.';
+      els.qrLog.appendChild(li);
+      return;
+    }
+    QR.history.forEach(function (item, i) {
+      var li = document.createElement('li');
+      var idx = document.createElement('span');
+      idx.className = 'idx';
+      idx.textContent = '#' + (QR.history.length - i);
+      var body = document.createElement('div');
+      body.className = 'body';
+      body.textContent = item.value;
+      var time = document.createElement('time');
+      time.dateTime = item.at.toISOString();
+      time.textContent = stamp(item.at) + ' · ' + item.engine +
+        (item.repeat > 1 ? ' · seen ' + item.repeat + '×' : '');
+      body.appendChild(time);
+      li.appendChild(idx);
+      li.appendChild(body);
+      els.qrLog.appendChild(li);
+    });
+  }
+
+  function showResult(value, engine, when) {
+    els.qrResult.classList.remove('empty');
+    els.qrResultLabel.textContent = 'Latest scan · ' + engine + ' · ' + stamp(when);
+    els.qrResultValue.textContent = value;
+    if (isUrl(value)) { els.qrOpen.hidden = false; els.qrOpen.href = value; }
+    else { els.qrOpen.hidden = true; els.qrOpen.removeAttribute('href'); }
+    setStatus(els.qrStatus, 'ok', 'QR code decoded (' + value.length + ' characters). Data stays in this browser.');
+  }
+
+  function handleScan(rawValue) {
+    var value = String(rawValue == null ? '' : rawValue);
+    if (!value) return;
+    var now = Date.now();
+
+    // Suppress the same code being re-reported on every frame.
+    if (value === QR.lastValue && now < QR.cooldownUntil) return;
+
+    var repeat = 1;
+    if (QR.history.length && QR.history[0].value === value) {
+      repeat = QR.history[0].repeat + 1;
+      QR.history[0].repeat = repeat;
+      QR.history[0].at = new Date();
+      renderHistory();
+    } else {
+      pushHistory({ value: value, at: new Date(), engine: QR.engine === 'native' ? 'native' : 'jsQR', repeat: 1 });
+    }
+
+    QR.lastValue = value;
+    QR.cooldownUntil = now + 2500;
+    showResult(value, QR.engine === 'native' ? 'BarcodeDetector' : 'jsQR', new Date());
+    buzz([18, 40, 18]);
+  }
+
+  function decodeWithJsQR(video) {
+    var w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return null;
+    var scale = Math.min(1, 720 / w);
+    var cw = Math.max(1, Math.round(w * scale));
+    var ch = Math.max(1, Math.round(h * scale));
+    var canvas = els.workCanvas;
+    canvas.width = cw;
+    canvas.height = ch;
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, cw, ch);
+    var frame;
+    try { frame = ctx.getImageData(0, 0, cw, ch); } catch (e) { return null; }
+    var found = window.jsQR(frame.data, cw, ch, { inversionAttempts: 'dontInvert' });
+    return found && found.data ? found.data : null;
+  }
+
+  function scanLoop(ts) {
+    if (!QR.scanning) return;
+    QR.rafId = requestAnimationFrame(scanLoop);
+
+    var video = els.qrVideo;
+    if (!Cam.stream || Cam.owner !== 'qr') return;
+    if (video.readyState < 2 || !video.videoWidth) return;
+
+    var interval = QR.engine === 'native' ? 120 : 180;
+    if (ts < QR.nextTick || QR.busyFrame) return;
+    QR.nextTick = ts + interval;
+    QR.busyFrame = true;
+
+    var work;
+    if (QR.engine === 'native' && QR.detector) {
+      work = Promise.resolve()
+        .then(function () { return QR.detector.detect(video); })
+        .then(function (codes) { return codes && codes.length ? codes[0].rawValue : null; });
+    } else if (QR.engine === 'jsqr') {
+      work = Promise.resolve().then(function () { return decodeWithJsQR(video); });
+    } else {
+      QR.busyFrame = false;
+      return;
+    }
+
+    work.then(function (value) {
+      QR.busyFrame = false;
+      if (value) handleScan(value);
+    }).catch(function () { QR.busyFrame = false; });
+  }
+
+  function startScanning() {
+    QR.engineBusy = true;
+    syncButtons();
+    Promise.resolve(QR.ready).then(function () {
+      if (QR.engine === 'none') {
+        QR.engineBusy = false;
+        setStatus(els.qrStatus, 'err', 'No QR decoder is available, so scanning cannot start. See the engine note above.');
+        syncButtons();
+        return;
+      }
+      setStatus(els.qrStatus, 'info', 'Starting scanner…');
+      return startCamera('qr').then(function (stream) {
+        QR.engineBusy = false;
+        if (!stream) { syncButtons(); return; }
+        QR.scanning = true;
+        QR.nextTick = 0;
+        QR.busyFrame = false;
+        if (QR.rafId) cancelAnimationFrame(QR.rafId);
+        QR.rafId = requestAnimationFrame(scanLoop);
+        syncButtons();
+        setStatus(els.qrStatus, 'info',
+          'Scanning for QR codes with ' + (QR.engine === 'native' ? 'the native BarcodeDetector API' : 'jsQR') +
+          '. Hold a code inside the frame.');
+      });
+    }).catch(function (err) {
+      QR.engineBusy = false;
+      syncButtons();
+      setStatus(els.qrStatus, 'err', 'Scanner failed to start: ' + ((err && err.message) || err));
+    });
+  }
+
+  els.qrStart.addEventListener('click', startScanning);
+
+  els.qrStop.addEventListener('click', function () {
+    stopScanLoop();
+    syncButtons();
+    setStatus(els.qrStatus, 'info', 'Scanning paused. The camera preview stays on — tap Start scanning to resume.');
+  });
+
+  els.qrRelease.addEventListener('click', function () {
+    stopCamera();
+    setStatus(els.qrStatus, 'info', 'Camera released — all media tracks stopped.');
+  });
+
+  els.qrFlip.addEventListener('click', function () {
+    Cam.facing = Cam.facing === 'user' ? 'environment' : 'user';
+    var wasScanning = QR.scanning;
+    stopCamera();   // release the track before re-negotiating facingMode
+    setStatus(els.qrStatus, 'info', 'Switching to the ' + (Cam.facing === 'user' ? 'front' : 'back') + ' camera…');
+    startCamera('qr').then(function (stream) {
+      if (stream && wasScanning) {
+        QR.scanning = true;
+        QR.nextTick = 0;
+        if (QR.rafId) cancelAnimationFrame(QR.rafId);
+        QR.rafId = requestAnimationFrame(scanLoop);
+      }
+      syncButtons();
+    });
+  });
+
+  els.qrClearLog.addEventListener('click', function () {
+    QR.history = [];
+    QR.lastValue = null;
+    QR.cooldownUntil = 0;
+    renderHistory();
+    els.qrResult.classList.add('empty');
+    els.qrResultLabel.textContent = 'Latest scan';
+    els.qrResultValue.textContent = 'No QR code found yet.';
+    els.qrOpen.hidden = true;
+    els.qrOpen.removeAttribute('href');
+    setStatus(els.qrStatus, 'info', 'Scan history cleared.');
+  });
+
+  els.qrCopy.addEventListener('click', function () {
+    var text = els.qrResultValue.textContent || '';
+    var done = function () { setStatus(els.qrStatus, 'ok', 'Copied the decoded text to the clipboard.'); };
+    var fail = function () { setStatus(els.qrStatus, 'warn', 'Clipboard access was blocked — select the text and copy manually.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { legacyCopy(text) ? done() : fail(); });
+    } else {
+      legacyCopy(text) ? done() : fail();
+    }
+  });
+
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Lifecycle: never leave a stream running behind
+   * ------------------------------------------------------------------ */
+
+  window.addEventListener('pagehide', function () { stopCamera(); });
+  window.addEventListener('beforeunload', function () { stopCamera(); });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && Cam.stream) stopCamera('Camera released because the page moved to the background.');
+  });
+  window.addEventListener('error', function (ev) {
+    if (ev && ev.message) setStatus(activeTab === 'qr' ? els.qrStatus : els.camStatus, 'err', 'Unexpected error: ' + ev.message);
+  });
+
+  /* ------------------------------------------------------------------ *
+   * Boot
+   * ------------------------------------------------------------------ */
+
+  clearPhoto();
+  renderHistory();
+  QR.ready = initEngine();
+  syncButtons();
+
+  var blockedMsg = preflight();
+  if (blockedMsg) {
+    setStatus(els.camStatus, 'err', blockedMsg);
+    setStatus(els.qrStatus, 'err', blockedMsg);
+  }
+
+  // Expose a tiny surface for manual/console testing of the stream guard.
+  window.eManifestCamQR = {
+    stop: stopCamera,
+    state: function () {
+      return {
+        hasStream: !!Cam.stream,
+        owner: Cam.owner,
+        facing: Cam.facing,
+        tracks: Cam.stream ? Cam.stream.getTracks().length : 0,
+        scanning: QR.scanning,
+        engine: QR.engine,
+        history: QR.history.length
+      };
+    }
+  };
+})();
+</script>
+
+<script>
+/*
+ * PWA bootstrap.
+ * A single HTML file cannot ship an external sw.js, so this section:
+ *   1. draws the app icons at runtime (canvas -> PNG data URLs),
+ *   2. injects a Web App Manifest as a data: URL built from those icons,
+ *   3. captures beforeinstallprompt and exposes an Install button,
+ *   4. attempts a service-worker registration where the browser allows one,
+ *   5. reports the honest install status on screen.
+ */
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var THEME = '#0b1020';
+  var APP_NAME = 'eManifest CamQR — Camera & QR Demo';
+  var SHORT_NAME = 'eManifest CamQR';
+
+  var isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+    navigator.standalone === true;
+
+  /* ---------- 1. runtime icon generation ---------- */
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawIcon(size) {
+    var c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    var ctx = c.getContext('2d');
+    if (!ctx) return null;
+
+    var g = ctx.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, '#4f8cff');
+    g.addColorStop(0.55, '#6a5cff');
+    g.addColorStop(1, '#2b1e6b');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+
+    // Keep artwork inside the maskable safe zone (central ~80%).
+    var pad = size * 0.2;
+    var box = size - pad * 2;
+    var u = box / 8;
+
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    // three QR finder patterns
+    [[0, 0], [5, 0], [0, 5]].forEach(function (p) {
+      roundRect(ctx, pad + p[0] * u, pad + p[1] * u, u * 3, u * 3, u * 0.4);
+      ctx.fill();
+    });
+    ctx.fillStyle = '#2b1e6b';
+    [[0, 0], [5, 0], [0, 5]].forEach(function (p) {
+      roundRect(ctx, pad + p[0] * u + u * 0.9, pad + p[1] * u + u * 0.9, u * 1.2, u * 1.2, u * 0.25);
+      ctx.fill();
+    });
+
+    // camera lens in the lower-right data area
+    ctx.fillStyle = 'rgba(255,255,255,.95)';
+    ctx.beginPath();
+    ctx.arc(pad + u * 6.2, pad + u * 6.2, u * 1.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2b1e6b';
+    ctx.beginPath();
+    ctx.arc(pad + u * 6.2, pad + u * 6.2, u * 0.85, 0, Math.PI * 2);
+    ctx.fill();
+
+    // a few data modules
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    [[3.4, 0.4], [4.6, 1.6], [3.4, 3.2], [5.2, 3.6], [1.2, 3.6], [0.4, 4.4]].forEach(function (p) {
+      roundRect(ctx, pad + p[0] * u, pad + p[1] * u, u * 0.8, u * 0.8, u * 0.16);
+      ctx.fill();
+    });
+
+    try { return c.toDataURL('image/png'); } catch (e) { return null; }
+  }
+
+  /* ---------- 2. inject manifest ---------- */
+
+  function injectManifest() {
+    var icon512 = drawIcon(512);
+    var icon192 = drawIcon(192);
+    var icon180 = drawIcon(180);
+    if (!icon512 || !icon192) return { ok: false, reason: 'Canvas could not encode PNG icons in this browser.' };
+
+    var baseUrl = location.href.split('#')[0];
+    var folder = baseUrl.slice(0, baseUrl.lastIndexOf('/') + 1) || '/';
+
+    var manifest = {
+      name: APP_NAME,
+      short_name: SHORT_NAME,
+      description: 'Offline-friendly demo: capture a photo with getUserMedia and decode QR codes with BarcodeDetector or jsQR. Nothing leaves the browser.',
+      id: folder,
+      start_url: baseUrl,
+      scope: folder,
+      display: 'standalone',
+      display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
+      orientation: 'portrait-primary',
+      background_color: THEME,
+      theme_color: THEME,
+      categories: ['utilities', 'productivity'],
+      lang: 'en',
+      icons: [
+        { src: icon192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: icon512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+      ],
+      shortcuts: [
+        { name: 'Scan QR code', short_name: 'Scan QR', url: baseUrl + '#qr', description: 'Open the QR scanner directly.' },
+        { name: 'Take picture', short_name: 'Photo', url: baseUrl + '#camera', description: 'Open the camera capture mode.' }
+      ]
+    };
+
+    var href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = href;
+    document.head.appendChild(link);
+
+    if (icon180) {
+      var apple = document.createElement('link');
+      apple.rel = 'apple-touch-icon';
+      apple.href = icon180;
+      document.head.appendChild(apple);
+    }
+    var fav = document.createElement('link');
+    fav.rel = 'icon';
+    fav.type = 'image/png';
+    fav.href = icon192;
+    document.head.appendChild(fav);
+
+    return { ok: true, manifest: manifest };
+  }
+
+  /* ---------- 3. service worker status ---------- */
+
+  // A genuinely single-file page cannot register a worker: browsers only accept a
+  // same-origin script URL, and reject blob:/data: worker scripts. So instead of
+  // firing a doomed register() call (which just logs console errors), we report
+  // whether a worker is already controlling this scope. Modern Chrome/Firefox
+  // install from the manifest alone; drop a sw.js beside this file for offline use.
+  function inspectServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+      return Promise.resolve({ ok: false, reason: 'unsupported in this browser.' });
+    }
+    var host = location.hostname;
+    var secureOrigin = location.protocol === 'https:' || host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    if (!secureOrigin) {
+      return Promise.resolve({ ok: false, reason: 'workers need an https:// or localhost origin (current: ' + location.protocol + ').' });
+    }
+    return navigator.serviceWorker.getRegistration().then(function (reg) {
+      if (reg && (reg.active || reg.installing || reg.waiting)) {
+        return { ok: true, via: 'active for scope ' + reg.scope };
+      }
+      return {
+        ok: false,
+        reason: 'none controlling this scope — a single self-contained file cannot register one ' +
+                '(blob:/data: worker scripts are rejected). Save a sw.js next to this page and reload to enable offline install.'
+      };
+    }).catch(function (err) {
+      return { ok: false, reason: 'could not query registrations: ' + ((err && err.message) || String(err)) };
+    });
+  }
+
+  /* ---------- 4. install prompt + status reporting ---------- */
+
+  var pill = $('pwa-pill'), pillText = $('pwa-pill-text');
+  var note = $('pwa-note-text');
+  var installBtn = $('install-btn');
+  var deferredPrompt = null;
+
+  function setPwa(tone, short, long) {
+    if (pill) pill.dataset.tone = tone;
+    if (pillText) pillText.textContent = short;
+    if (note) note.textContent = long;
+  }
+
+  window.addEventListener('beforeinstallprompt', function (ev) {
+    ev.preventDefault();
+    deferredPrompt = ev;
+    installBtn.hidden = false;
+    setPwa('ok', 'PWA: installable',
+      'This page is installable. Tap Install (top right) or use your browser menu → “Install app” / “Add to Home Screen”.');
+  });
+
+  installBtn.addEventListener('click', function () {
+    if (!deferredPrompt) {
+      setPwa('warn', 'PWA: manual install',
+        'The browser did not offer an automatic install prompt. Use the browser menu → “Install app” / “Add to Home Screen”, ' +
+        'or serve this file over HTTPS with a sw.js next to it for full offline install.');
+      return;
+    }
+    installBtn.disabled = true;
+    deferredPrompt.prompt();
+    // Safety: some browsers never settle userChoice; never leave the button stuck.
+    var promptSafety = setTimeout(function () { if (installBtn.disabled) installBtn.disabled = false; }, 15000);
+    deferredPrompt.userChoice.then(function (choice) {
+      clearTimeout(promptSafety);
+      installBtn.disabled = false;
+      installBtn.hidden = true;
+      deferredPrompt = null;
+      if (choice && choice.outcome === 'accepted') setPwa('ok', 'PWA: installed', 'Installed. Launch eManifest CamQR from your home screen or app list.');
+      else setPwa('warn', 'PWA: not installed', 'Install dismissed. You can install later from the browser menu.');
+    }).catch(function () { installBtn.disabled = false; });
+  });
+
+  window.addEventListener('appinstalled', function () {
+    installBtn.hidden = true;
+    deferredPrompt = null;
+    setPwa('ok', 'PWA: installed', 'Installed successfully. Launch eManifest CamQR from your home screen or app list.');
+  });
+
+  /* ---------- 5. boot ---------- */
+
+  var info = {
+    secure: $('info-secure'), media: $('info-media'), bd: $('info-bd'),
+    sw: $('info-sw'), standalone: $('info-standalone')
+  };
+
+  function fillInfo(manifestResult, swResult) {
+    if (info.secure) info.secure.textContent = window.isSecureContext ? 'yes' : 'no — camera will be blocked (' + location.protocol + ')';
+    if (info.media) info.media.textContent = (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) ? 'available' : 'unavailable';
+    if (info.bd) info.bd.textContent = ('BarcodeDetector' in window) ? 'native API present' : 'absent — jsQR fallback';
+    if (info.sw) info.sw.textContent = swResult.ok ? 'registered (' + swResult.via + ')' : 'not registered — ' + swResult.reason;
+    if (info.standalone) info.standalone.textContent = isStandalone ? 'running as installed app' : 'running in a browser tab';
+
+    if (isStandalone) {
+      setPwa('ok', 'PWA: installed', 'Running in standalone mode as an installed app. Camera and QR scanning work fully offline.');
+      installBtn.hidden = true;
+      return;
+    }
+    if (deferredPrompt) return; // beforeinstallprompt already reported
+
+    if (!window.isSecureContext) {
+      setPwa('err', 'PWA: needs HTTPS',
+        'Install and camera access both require https:// or http://localhost. Serve this file from a secure origin, then reload.');
+    } else if (manifestResult.ok && swResult.ok) {
+      setPwa('ok', 'PWA: ready',
+        'Manifest is active and a service worker controls this scope. Use the browser menu → “Install app” / “Add to Home Screen” if no prompt appears.');
+    } else {
+      setPwa('warn', 'PWA: manual install',
+        (manifestResult.ok ? 'The web app manifest is embedded inline (runtime-generated icons). ' : 'Manifest could not be embedded: ' + manifestResult.reason + '. ') +
+        'Chrome and Edge install from the manifest alone; on iOS Safari use Share → Add to Home Screen. ' +
+        (swResult.ok ? '' : 'A service worker ' + swResult.reason + ' '));
+    }
+  }
+
+  var manifestResult = injectManifest();
+  inspectServiceWorker().then(function (swResult) {
+    fillInfo(manifestResult, swResult);
+  }).catch(function (err) {
+    fillInfo(manifestResult, { ok: false, reason: (err && err.message) || String(err) });
+  });
+
+  // Deep-link support for manifest shortcuts (#qr / #camera).
+  if (location.hash === '#qr') {
+    var qrTab = $('tab-btn-qr');
+    if (qrTab) qrTab.click();
+  }
+})();
+</script>
+</body>
+</html>
